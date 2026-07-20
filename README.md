@@ -127,6 +127,29 @@ npm run build  # 生产构建
 - `cc98.org`、`*.cc98.org`
 - `api.cc98.org`、`openid.cc98.org`、`file.cc98.org`
 
+### v2rayN 配置示例
+
+1. 打开 **设置 → 路由设置**。
+2. 编辑当前使用的路由，选择 **添加规则**。
+3. 新规则设置为：
+   - 别名：`CC98 直连`
+   - `outboundTag`：`direct`
+   - `Domain`：
+
+     ```text
+     domain:cc98.org,
+     domain:www.cc98.org,
+     domain:api.cc98.org,
+     domain:openid.cc98.org,
+     domain:file.cc98.org
+     ```
+
+4. 启用并保存规则，确保它的优先级高于兜底代理规则；必要时重启 v2rayN 或重新连接代理。
+
+![v2rayN CC98 直连路由规则](assets/v2rayn-direct-routing.png)
+
+> 直连规则只负责让这些域名绕过代理节点；校外访问时仍可能需要先连接浙大 RVPN。
+
 不确定时先运行 **CC98: Test API connectivity**：
 
 - 通 → 再复制笔记并上传  
