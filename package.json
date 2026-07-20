@@ -1,0 +1,28 @@
+{
+	"name": "obsidian-cc98-publish",
+	"version": "0.1.0",
+	"description": "Copy Obsidian notes as CC98-ready UBB or Markdown with image upload",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test": "node --import tsx --test tests/*.test.ts"
+	},
+	"keywords": [
+		"obsidian",
+		"cc98"
+	],
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"esbuild": "^0.25.0",
+		"obsidian": "^1.7.2",
+		"tslib": "^2.6.2",
+		"tsx": "^4.19.0",
+		"typescript": "^5.3.3"
+	},
+	"allowScripts": {
+		"esbuild@0.25.12": true,
+		"esbuild@0.28.1": true
+	}
+}

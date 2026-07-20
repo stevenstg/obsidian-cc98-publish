@@ -1,0 +1,97 @@
+/* CC98 Publish — login status card (inspired by weread plugin) */
+
+.cc98-login-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 16px 18px;
+	margin: 12px 0 18px;
+	background-color: var(--background-secondary);
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.cc98-login-card.is-logged-in {
+	border-color: var(--color-green, #0d7377);
+	background: color-mix(in srgb, var(--color-green, #0d7377) 8%, var(--background-secondary));
+}
+
+.cc98-login-card.is-unverified {
+	border-color: var(--color-orange, #c8963e);
+}
+
+.cc98-login-status-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.cc98-login-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 600;
+	font-size: 0.95rem;
+	color: var(--text-normal);
+}
+
+.cc98-login-badge .dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--text-muted);
+}
+
+.cc98-login-card.is-logged-in .cc98-login-badge .dot {
+	background: var(--color-green, #0d7377);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-green, #0d7377) 25%, transparent);
+}
+
+.cc98-login-card.is-unverified .cc98-login-badge .dot {
+	background: var(--color-orange, #c8963e);
+}
+
+.cc98-login-meta {
+	font-size: 0.85rem;
+	color: var(--text-muted);
+	line-height: 1.4;
+}
+
+.cc98-login-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.cc98-board-hits {
+	margin: 6px 0 12px;
+	padding: 8px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	max-height: 180px;
+	overflow: auto;
+}
+
+.cc98-board-hit {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.9rem;
+}
+
+.cc98-board-hit:hover {
+	background: var(--background-modifier-hover);
+}
+
+.cc98-board-hit .id {
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+	font-size: 0.8rem;
+}
