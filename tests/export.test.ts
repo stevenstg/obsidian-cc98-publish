@@ -21,4 +21,14 @@ describe("formatExportBody", () => {
 			false
 		);
 	});
+
+	it("ignores local image syntax used as code examples", () => {
+		const examples = [
+			"识别 `![[图片.png]]` 和 `![](相对路径.png)`",
+			"```markdown",
+			"![](assets/a.png)",
+			"```",
+		].join("\n");
+		assert.equal(hasUnresolvedLocalImages(examples), false);
+	});
 });

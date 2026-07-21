@@ -623,8 +623,8 @@ export default class Cc98PublishPlugin extends Plugin {
 
 			const format = getExportFormat(settings);
 			// Full MD→UBB when export format is UBB (images already [img] or still MD img)
+			const hasLocalImages = hasUnresolvedLocalImages(img.body);
 			const body = formatExportBody(img.body, format);
-			const hasLocalImages = hasUnresolvedLocalImages(body);
 			progress.setMessage("CC98: 正在写入剪贴板…");
 
 			try {
