@@ -1959,7 +1959,12 @@ function formatExportBody(body, format) {
   return format === "ubb" ? markdownToUbb(body) : body;
 }
 function hasUnresolvedLocalImages(body) {
-  return /!\[[^\]]*\]\((?!\s*(?:https?:\/\/|data:))[^)]+\)/i.test(body) || /!\[\[[^\]]+\]\]/.test(body) || /\[img\](?!\s*(?:https?:\/\/|data:))[^[]+\[\/img\]/i.test(body);
+  let found = false;
+  mapOutsideCode(body, (text) => {
+    found || (found = /!\[[^\]]*\]\((?!\s*(?:https?:\/\/|data:))[^)]+\)/i.test(text) || /!\[\[[^\]]+\]\]/.test(text) || /\[img\](?!\s*(?:https?:\/\/|data:))[^[]+\[\/img\]/i.test(text));
+    return text;
+  });
+  return found;
 }
 
 // src/copy-notice.ts
@@ -2511,8 +2516,8 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
       }
       if (this.unloaded) return;
       const format = getExportFormat(settings);
+      const hasLocalImages = hasUnresolvedLocalImages(img.body);
       const body = formatExportBody(img.body, format);
-      const hasLocalImages = hasUnresolvedLocalImages(body);
       progress.setMessage("CC98: \u6B63\u5728\u5199\u5165\u526A\u8D34\u677F\u2026");
       try {
         await copyTextToClipboard(body);

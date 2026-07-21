@@ -1,4 +1,5 @@
 import type { ExportFormat } from "./settings";
+import { mapOutsideCode } from "./convert";
 import { markdownToUbb } from "./md-to-ubb";
 
 export function formatExportBody(body: string, format: ExportFormat): string {
@@ -6,9 +7,13 @@ export function formatExportBody(body: string, format: ExportFormat): string {
 }
 
 export function hasUnresolvedLocalImages(body: string): boolean {
-	return (
-		/!\[[^\]]*\]\((?!\s*(?:https?:\/\/|data:))[^)]+\)/i.test(body) ||
-		/!\[\[[^\]]+\]\]/.test(body) ||
-		/\[img\](?!\s*(?:https?:\/\/|data:))[^[]+\[\/img\]/i.test(body)
-	);
+	let found = false;
+	mapOutsideCode(body, (text) => {
+		found ||=
+			/!\[[^\]]*\]\((?!\s*(?:https?:\/\/|data:))[^)]+\)/i.test(text) ||
+			/!\[\[[^\]]+\]\]/.test(text) ||
+			/\[img\](?!\s*(?:https?:\/\/|data:))[^[]+\[\/img\]/i.test(text);
+		return text;
+	});
+	return found;
 }
