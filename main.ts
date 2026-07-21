@@ -19,6 +19,7 @@ import {
 import { settingsForDisk } from "./src/settings-storage";
 import { createSingleFlight, refreshThenLogin } from "./src/auth-flow";
 import { formatExportBody, hasUnresolvedLocalImages } from "./src/export";
+import { formatCopyResultNotice } from "./src/copy-notice";
 
 const SECRET_ACCESS = "cc98-publish-access";
 const SECRET_REFRESH = "cc98-publish-refresh";
@@ -58,13 +59,13 @@ export default class Cc98PublishPlugin extends Plugin {
 
 		console.info("[CC98 Publish] loaded", this.manifest.version);
 
-		this.addRibbonIcon("clipboard-copy", "CC98: Copy note for paste", () => {
+		this.addRibbonIcon("clipboard-copy", "CC98: 复制当前笔记", () => {
 			void this.safeRun(() => this.copyCurrentNote(true));
 		});
 
 		this.addCommand({
 			id: "cc98-copy-current-note",
-			name: "CC98: Copy current note for paste",
+			name: "CC98: 复制当前笔记用于粘贴",
 			callback: () => {
 				void this.safeRun(() => this.copyCurrentNote(true));
 			},
@@ -72,7 +73,7 @@ export default class Cc98PublishPlugin extends Plugin {
 
 		this.addCommand({
 			id: "cc98-copy-selection",
-			name: "CC98: Copy selection for paste",
+			name: "CC98: 复制选区用于粘贴",
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				void this.safeRun(() => this.copySelection(editor, view, true));
 			},
@@ -80,7 +81,7 @@ export default class Cc98PublishPlugin extends Plugin {
 
 		this.addCommand({
 			id: "cc98-probe-network",
-			name: "CC98: Test API connectivity",
+			name: "CC98: 测试 API 连通性",
 			callback: () => {
 				void this.safeRun(async () => {
 					new Notice("CC98: 正在探测 api.cc98.org …");
@@ -99,7 +100,7 @@ export default class Cc98PublishPlugin extends Plugin {
 
 		this.addCommand({
 			id: "cc98-login",
-			name: "CC98: Login (fetch token)",
+			name: "CC98: 登录并获取 Token",
 			callback: () => {
 				void this.safeRun(async () => {
 					await this.loginWithCredentials();
@@ -179,19 +180,19 @@ export default class Cc98PublishPlugin extends Plugin {
 	 * UI should show「登录完成」status card after success (weread-style).
 	 */
 	async loginWithCredentials(): Promise<AuthResult> {
-		return this.runAuth(() => this.loginWithCredentialsNow());
+		return this.runAuth(() => this.loginWithCredentialsNow(true));
 	}
 
-	private async loginWithCredentialsNow(): Promise<AuthResult> {
+	private async loginWithCredentialsNow(notify: boolean): Promise<AuthResult> {
 		const user = this.settings.username?.trim() || "";
 		const pass = this.sessionPassword || this.settings.password || "";
 		if (!user || !pass) {
 			this.lastLoginMessage = "请先填写用户名和密码";
-			new Notice("CC98: 请先填写用户名和密码", 8000);
+			if (notify) new Notice("CC98: 请先填写用户名和密码", 8000);
 			return { ok: false, error: "缺少用户名或密码" };
 		}
 		this.lastLoginMessage = "正在登录…";
-		new Notice("CC98: 正在登录 openid.cc98.org …");
+		if (notify) new Notice("CC98: 正在登录 openid.cc98.org …");
 		const r = await loginWithPassword(
 			this.settings.openIdBase,
 			user,
@@ -200,7 +201,9 @@ export default class Cc98PublishPlugin extends Plugin {
 		if (this.unloaded) return { ok: false, error: "unloaded" };
 		if (!r.ok || !r.accessToken) {
 			this.lastLoginMessage = `登录失败：${r.error || "未知错误"}`;
-			new Notice(`CC98: 登录失败 — ${r.error || "未知错误"}`, 12000);
+			if (notify) {
+				new Notice(`CC98: 登录失败 — ${r.error || "未知错误"}`, 12000);
+			}
 			return { ok: false, error: r.error };
 		}
 		this.settings.accessToken = normalizeAccessToken(r.accessToken);
@@ -231,7 +234,7 @@ export default class Cc98PublishPlugin extends Plugin {
 				: "登录完成"
 			: `已获取 token，尚未验证：${me.error || "无法读取账号信息"}`;
 		await this.saveSettings();
-		new Notice(`CC98: ${this.lastLoginMessage}`, 8000);
+		if (notify) new Notice(`CC98: ${this.lastLoginMessage}`, 8000);
 		return {
 			ok: true,
 			accessToken: this.settings.accessToken,
@@ -262,7 +265,6 @@ export default class Cc98PublishPlugin extends Plugin {
 		const result = await refreshThenLogin<AuthResult>(
 			refresh
 				? async () => {
-					new Notice("CC98: 正在刷新 token …");
 					const r = await refreshAccessToken(s.openIdBase, refresh);
 					if (!r.ok || !r.accessToken) {
 						console.warn("[CC98 Publish] refresh failed", r.error);
@@ -283,7 +285,7 @@ export default class Cc98PublishPlugin extends Plugin {
 					};
 				}
 				: null,
-			canLogin ? () => this.loginWithCredentialsNow() : null
+			canLogin ? () => this.loginWithCredentialsNow(false) : null
 		);
 		if (result?.ok) return result;
 
@@ -470,7 +472,7 @@ export default class Cc98PublishPlugin extends Plugin {
 				secretWriteOk = false;
 				console.warn("[CC98 Publish] secretStorage write failed", e);
 				new Notice(
-					"CC98: 密钥存储写入失败，已保留 data.json 中的 token（若有）",
+					"CC98: 密钥存储写入失败；Access Token 将回退到 data.json，Refresh Token 仅在启用持久化时保留",
 					10000
 				);
 			}
@@ -505,7 +507,6 @@ export default class Cc98PublishPlugin extends Plugin {
 		}
 		this.running = true;
 		const start = Date.now();
-		new Notice("CC98: 开始处理…");
 		try {
 			await fn();
 			if (!this.unloaded) {
@@ -537,7 +538,6 @@ export default class Cc98PublishPlugin extends Plugin {
 			new Notice("CC98: 当前文件不是 Markdown（.md），请打开笔记后再试");
 			return;
 		}
-		new Notice(`CC98: 读取「${file.basename}」…`);
 		const source = await this.app.vault.read(file);
 		if (this.unloaded) return;
 		await this.runPipeline(source, file.path, file.basename, upload);
@@ -565,153 +565,122 @@ export default class Cc98PublishPlugin extends Plugin {
 		basename: string,
 		upload: boolean
 	) {
-		let settings = this.effectiveSettings();
-		const converted = convertMarkdown(source, {
-			stripFrontmatter: settings.stripFrontmatter,
-			stripFirstH1: settings.stripFirstH1,
-			stripTags: settings.stripTags,
-		});
+		const progress = new Notice("CC98: 正在转换…", 0);
+		try {
+			let settings = this.effectiveSettings();
+			const converted = convertMarkdown(source, {
+				stripFrontmatter: settings.stripFrontmatter,
+				stripFirstH1: settings.stripFirstH1,
+				stripTags: settings.stripTags,
+			});
 
-		const localCount = converted.localImageRefs.length;
-		let doUpload = upload && localCount > 0;
-		if (doUpload) {
-			const auth = await this.ensureAuthTokens();
-			settings = this.effectiveSettings();
-			// R3-A01: ensureAuth 失败则不要假装还能上传
-			if (!auth.ok && !normalizeAccessToken(settings.accessToken)) {
+			const localCount = converted.localImageRefs.length;
+			let doUpload = upload && localCount > 0;
+			let preflightError = "";
+			if (doUpload) {
+				progress.setMessage("CC98: 正在验证登录并准备上传…");
+				const auth = await this.ensureAuthTokens();
+				settings = this.effectiveSettings();
+				// R3-A01: ensureAuth 失败则不要假装还能上传
+				if (!auth.ok && !normalizeAccessToken(settings.accessToken)) {
+					preflightError = auth.error || "鉴权失败";
+					doUpload = false;
+				}
+			}
+			progress.setMessage(
+				doUpload
+					? `CC98: 正在上传 ${localCount} 张图片（每张最多约 20s）…`
+					: "CC98: 正在生成正文…"
+			);
+
+			const img = await processImages(
+				this.app,
+				sourcePath,
+				converted,
+				settings,
+				doUpload,
+				() => this.reauthAfter401()
+			);
+
+			if (this.unloaded) return;
+
+			if (img.newAccessToken) {
+				this.settings.accessToken = img.newAccessToken;
+			}
+			if (img.newRefreshToken) {
+				this.settings.refreshToken = img.newRefreshToken;
+				this.sessionRefreshToken = img.newRefreshToken;
+			}
+			if (img.newAccessToken || img.newRefreshToken) {
+				await this.saveSettings();
+			}
+			if (img.uploaded > 0) {
+				this.loginVerified = true;
+				this.lastLoginMessage = "登录完成 · 上传鉴权已验证";
+			}
+
+			if (this.unloaded) return;
+
+			const format = getExportFormat(settings);
+			// Full MD→UBB when export format is UBB (images already [img] or still MD img)
+			const body = formatExportBody(img.body, format);
+			const hasLocalImages = hasUnresolvedLocalImages(body);
+			progress.setMessage("CC98: 正在写入剪贴板…");
+
+			try {
+				await copyTextToClipboard(body);
+			} catch (e) {
+				progress.hide();
 				new Notice(
-					`CC98: ${auth.error || "鉴权失败"}。将只转换不上传。`,
-					12000
+					`CC98: 复制失败 — ${e instanceof Error ? e.message : String(e)}。正文 ${body.length} 字已生成。`,
+					15000
 				);
-				doUpload = false;
-			} else {
-				new Notice(
-					`CC98: 转换完成，开始上传 ${localCount} 张图（每张最多约 20s）…`
+				console.warn(
+					"[CC98 Publish] clipboard failed",
+					e instanceof Error ? e.name : "error",
+					"bodyLength=",
+					body.length
+				);
+				return;
+			}
+
+			if (this.unloaded) return;
+
+			const title = converted.title || basename;
+			if (img.failed.length) {
+				console.warn("[CC98 Publish] image failures:", img.failed);
+			}
+			const resultMessage = formatCopyResultNotice({
+				bodyLength: body.length,
+				format,
+				localCount,
+				uploadAttempted: doUpload,
+				uploaded: img.uploaded,
+				failures: img.failed,
+				unresolvedLocalImages: hasLocalImages,
+				maxLength: settings.maxLength,
+				title,
+				showTitle: settings.showTitleNotice,
+				preflightError: preflightError || undefined,
+			});
+			progress.hide();
+			new Notice(
+				resultMessage,
+				preflightError || img.failed.length || hasLocalImages ? 15000 : 10000
+			);
+
+			if (
+				!this.unloaded &&
+				!hasLocalImages &&
+				settings.openEditorAfterCopy &&
+				settings.defaultBoardId
+			) {
+				window.open(
+					`https://www.cc98.org/editor/postTopic/${settings.defaultBoardId}`
 				);
 			}
-		}
-		if (!doUpload) {
-			new Notice(
-				localCount === 0
-					? "CC98: 转换完成（无本地图），写入剪贴板…"
-					: "CC98: 转换完成，写入剪贴板（未上传）…"
-			);
-		}
-
-		const img = await processImages(
-			this.app,
-			sourcePath,
-			converted,
-			settings,
-			doUpload,
-			() => this.reauthAfter401()
-		);
-
-		if (this.unloaded) return;
-
-		if (img.newAccessToken) {
-			this.settings.accessToken = img.newAccessToken;
-		}
-		if (img.newRefreshToken) {
-			this.settings.refreshToken = img.newRefreshToken;
-			this.sessionRefreshToken = img.newRefreshToken;
-		}
-		if (img.newAccessToken || img.newRefreshToken) {
-			await this.saveSettings();
-		}
-		if (img.uploaded > 0) {
-			this.loginVerified = true;
-			this.lastLoginMessage = "登录完成 · 上传鉴权已验证";
-		}
-
-		if (this.unloaded) return;
-
-		const format = getExportFormat(settings);
-		// Full MD→UBB when export format is UBB (images already [img] or still MD img)
-		let body = formatExportBody(img.body, format);
-		const hasLocalImages = hasUnresolvedLocalImages(body);
-
-		try {
-			await copyTextToClipboard(body);
-		} catch (e) {
-			new Notice(
-				`CC98: 复制失败 — ${e instanceof Error ? e.message : String(e)}。正文 ${body.length} 字已生成。`,
-				15000
-			);
-			console.warn(
-				"[CC98 Publish] clipboard failed",
-				e instanceof Error ? e.name : "error",
-				"bodyLength=",
-				body.length
-			);
-			return;
-		}
-
-		if (this.unloaded) return;
-
-		const title = converted.title || basename;
-		const parts: string[] = [
-			`已复制 ${body.length} 字`,
-			format === "ubb" ? "导出 UBB" : "导出 Markdown",
-		];
-		if (localCount === 0) {
-			parts.push("无本地图");
-		} else if (!doUpload) {
-			parts.push("未上传");
-		} else {
-			parts.push(`上传 ${img.uploaded}/${localCount}`);
-		}
-		if (img.failed.length) {
-			parts.push(`失败 ${img.failed.length}`);
-		}
-		if (body.length > settings.maxLength) {
-			parts.push(`⚠ 超过 ${settings.maxLength} 字`);
-		}
-
-		new Notice(`CC98: ${parts.join(" · ")}`, 10000);
-
-		if (hasLocalImages) {
-			new Notice(
-				"CC98: 已复制，但正文仍有本地图片路径，请勿直接发帖。",
-				12000
-			);
-		} else if (doUpload && localCount > 0 && img.uploaded === 0) {
-			new Notice(
-				"CC98: 本地图一张都没上传成功。请查看图片问题与控制台。",
-				12000
-			);
-		} else {
-			new Notice(
-				format === "ubb"
-					? "请粘贴到 CC98「UBB」编辑器"
-					: "请粘贴到 CC98「Markdown」编辑器",
-				8000
-			);
-		}
-
-		if (settings.showTitleNotice && title) {
-			new Notice(`CC98 标题建议: ${title}`, 8000);
-		}
-
-		if (img.failed.length) {
-			console.warn("[CC98 Publish] image failures:", img.failed);
-			new Notice(
-				`CC98 图片问题: ${img.failed.slice(0, 3).join("; ")}${
-					img.failed.length > 3 ? "…" : ""
-				}`,
-				12000
-			);
-		}
-
-		if (
-			!this.unloaded &&
-			!hasLocalImages &&
-			settings.openEditorAfterCopy &&
-			settings.defaultBoardId
-		) {
-			window.open(
-				`https://www.cc98.org/editor/postTopic/${settings.defaultBoardId}`
-			);
+		} finally {
+			progress.hide();
 		}
 	}
 }

@@ -933,7 +933,9 @@ var Cc98SettingTab = class extends import_obsidian.PluginSettingTab {
       text.inputEl.type = "password";
       text.inputEl.autocomplete = "off";
     });
-    new import_obsidian.Setting(advBody).setName("\u6301\u4E45\u5316 Refresh Token").setDesc("OneDrive vault \u5EFA\u8BAE\u5173\u95ED").addToggle(
+    new import_obsidian.Setting(advBody).setName("\u6301\u4E45\u5316 Refresh Token").setDesc(
+      "\u5173\u95ED\u66F4\u5B89\u5168\uFF1B\u5F00\u542F\u53EF\u51CF\u5C11\u91CD\u590D\u767B\u5F55\uFF0C\u4F46 token \u53EF\u80FD\u968F vault \u540C\u6B65"
+    ).addToggle(
       (t) => t.setValue(this.plugin.settings.persistRefreshToken).onChange(async (v) => {
         this.plugin.settings.persistRefreshToken = v;
         await this.plugin.saveSettings();
@@ -1960,6 +1962,68 @@ function hasUnresolvedLocalImages(body) {
   return /!\[[^\]]*\]\((?!\s*(?:https?:\/\/|data:))[^)]+\)/i.test(body) || /!\[\[[^\]]+\]\]/.test(body) || /\[img\](?!\s*(?:https?:\/\/|data:))[^[]+\[\/img\]/i.test(body);
 }
 
+// src/copy-notice.ts
+function nextStepFor(errors) {
+  if (/401/i.test(errors)) {
+    return "\u5728\u8BBE\u7F6E\u4E2D\u91CD\u65B0\u767B\u5F55\u540E\u91CD\u8BD5\u3002";
+  }
+  if (/403|被拒绝/i.test(errors)) {
+    return "\u5148\u91CD\u65B0\u767B\u5F55\uFF1B\u4ECD\u5931\u8D25\u5219\u8FD0\u884C\u201CCC98: \u6D4B\u8BD5 API \u8FDE\u901A\u6027\u201D\uFF0C\u5E76\u68C0\u67E5\u6821\u56ED\u7F51/RVPN\u53CA *.cc98.org \u7684 DIRECT \u89C4\u5219\u3002";
+  }
+  if (/超时|停止等待|网络|无法连通|failed to fetch|ECONN|ENOTFOUND|ETIMEDOUT|RVPN|proxy/i.test(
+    errors
+  )) {
+    return "\u8FD0\u884C\u201CCC98: \u6D4B\u8BD5 API \u8FDE\u901A\u6027\u201D\uFF0C\u5E76\u68C0\u67E5\u6821\u56ED\u7F51/RVPN\u53CA\u4EE3\u7406 DIRECT \u89C4\u5219\u3002";
+  }
+  if (/找不到文件|读取失败/i.test(errors)) {
+    return "\u68C0\u67E5\u7B14\u8BB0\u4E2D\u7684\u56FE\u7247\u8DEF\u5F84\u53CA\u5BF9\u5E94\u6587\u4EF6\u662F\u5426\u5B58\u5728\u3002";
+  }
+  if (/鉴权|token|登录/i.test(errors)) {
+    return "\u5728\u8BBE\u7F6E\u4E2D\u91CD\u65B0\u767B\u5F55\u540E\u91CD\u8BD5\u3002";
+  }
+  return errors ? "\u6839\u636E\u4E0A\u65B9\u56FE\u7247\u95EE\u9898\u4FEE\u6B63\u540E\u91CD\u8BD5\u3002" : "";
+}
+function formatCopyResultNotice(input) {
+  const summary = [
+    `\u5DF2\u590D\u5236 ${input.bodyLength} \u5B57`,
+    input.format === "ubb" ? "\u5BFC\u51FA UBB" : "\u5BFC\u51FA Markdown"
+  ];
+  if (input.localCount === 0) {
+    summary.push("\u65E0\u672C\u5730\u56FE");
+  } else if (!input.uploadAttempted) {
+    summary.push("\u672A\u4E0A\u4F20");
+  } else {
+    summary.push(`\u4E0A\u4F20 ${input.uploaded}/${input.localCount}`);
+  }
+  if (input.failures.length) summary.push(`\u95EE\u9898 ${input.failures.length}`);
+  if (input.bodyLength > input.maxLength) {
+    summary.push(`\u26A0 \u8D85\u8FC7 ${input.maxLength} \u5B57`);
+  }
+  const lines = [
+    `CC98: ${summary.join(" \xB7 ")}`,
+    input.format === "ubb" ? "\u8BF7\u7C98\u8D34\u5230 CC98\u300CUBB\u300D\u7F16\u8F91\u5668\u3002" : "\u8BF7\u7C98\u8D34\u5230 CC98\u300CMarkdown\u300D\u7F16\u8F91\u5668\u3002"
+  ];
+  if (input.showTitle && input.title) {
+    lines.push(`\u6807\u9898\u5EFA\u8BAE\uFF1A${input.title}`);
+  }
+  if (input.preflightError) {
+    lines.push(`\u672A\u4E0A\u4F20\u539F\u56E0\uFF1A${input.preflightError}`);
+  }
+  if (input.failures.length) {
+    lines.push(
+      `\u56FE\u7247\u95EE\u9898\uFF1A${input.failures.slice(0, 3).join("; ")}${input.failures.length > 3 ? "\u2026" : ""}`
+    );
+  }
+  if (input.unresolvedLocalImages) {
+    lines.push("\u6B63\u6587\u4ECD\u542B\u672C\u5730\u56FE\u7247\u8DEF\u5F84\uFF0C\u8BF7\u52FF\u76F4\u63A5\u53D1\u5E16\u3002");
+  }
+  const nextStep = nextStepFor(
+    [input.preflightError || "", ...input.failures].join("\n")
+  );
+  if (nextStep) lines.push(`\u4E0B\u4E00\u6B65\uFF1A${nextStep}`);
+  return lines.join("\n");
+}
+
 // main.ts
 var SECRET_ACCESS = "cc98-publish-access";
 var SECRET_REFRESH = "cc98-publish-refresh";
@@ -1983,26 +2047,26 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     this.unloaded = false;
     await this.loadSettings();
     console.info("[CC98 Publish] loaded", this.manifest.version);
-    this.addRibbonIcon("clipboard-copy", "CC98: Copy note for paste", () => {
+    this.addRibbonIcon("clipboard-copy", "CC98: \u590D\u5236\u5F53\u524D\u7B14\u8BB0", () => {
       void this.safeRun(() => this.copyCurrentNote(true));
     });
     this.addCommand({
       id: "cc98-copy-current-note",
-      name: "CC98: Copy current note for paste",
+      name: "CC98: \u590D\u5236\u5F53\u524D\u7B14\u8BB0\u7528\u4E8E\u7C98\u8D34",
       callback: () => {
         void this.safeRun(() => this.copyCurrentNote(true));
       }
     });
     this.addCommand({
       id: "cc98-copy-selection",
-      name: "CC98: Copy selection for paste",
+      name: "CC98: \u590D\u5236\u9009\u533A\u7528\u4E8E\u7C98\u8D34",
       editorCallback: (editor, view) => {
         void this.safeRun(() => this.copySelection(editor, view, true));
       }
     });
     this.addCommand({
       id: "cc98-probe-network",
-      name: "CC98: Test API connectivity",
+      name: "CC98: \u6D4B\u8BD5 API \u8FDE\u901A\u6027",
       callback: () => {
         void this.safeRun(async () => {
           new import_obsidian4.Notice("CC98: \u6B63\u5728\u63A2\u6D4B api.cc98.org \u2026");
@@ -2020,7 +2084,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     });
     this.addCommand({
       id: "cc98-login",
-      name: "CC98: Login (fetch token)",
+      name: "CC98: \u767B\u5F55\u5E76\u83B7\u53D6 Token",
       callback: () => {
         void this.safeRun(async () => {
           await this.loginWithCredentials();
@@ -2086,19 +2150,19 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
    * UI should show「登录完成」status card after success (weread-style).
    */
   async loginWithCredentials() {
-    return this.runAuth(() => this.loginWithCredentialsNow());
+    return this.runAuth(() => this.loginWithCredentialsNow(true));
   }
-  async loginWithCredentialsNow() {
+  async loginWithCredentialsNow(notify) {
     var _a;
     const user = ((_a = this.settings.username) == null ? void 0 : _a.trim()) || "";
     const pass = this.sessionPassword || this.settings.password || "";
     if (!user || !pass) {
       this.lastLoginMessage = "\u8BF7\u5148\u586B\u5199\u7528\u6237\u540D\u548C\u5BC6\u7801";
-      new import_obsidian4.Notice("CC98: \u8BF7\u5148\u586B\u5199\u7528\u6237\u540D\u548C\u5BC6\u7801", 8e3);
+      if (notify) new import_obsidian4.Notice("CC98: \u8BF7\u5148\u586B\u5199\u7528\u6237\u540D\u548C\u5BC6\u7801", 8e3);
       return { ok: false, error: "\u7F3A\u5C11\u7528\u6237\u540D\u6216\u5BC6\u7801" };
     }
     this.lastLoginMessage = "\u6B63\u5728\u767B\u5F55\u2026";
-    new import_obsidian4.Notice("CC98: \u6B63\u5728\u767B\u5F55 openid.cc98.org \u2026");
+    if (notify) new import_obsidian4.Notice("CC98: \u6B63\u5728\u767B\u5F55 openid.cc98.org \u2026");
     const r = await loginWithPassword(
       this.settings.openIdBase,
       user,
@@ -2107,7 +2171,9 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     if (this.unloaded) return { ok: false, error: "unloaded" };
     if (!r.ok || !r.accessToken) {
       this.lastLoginMessage = `\u767B\u5F55\u5931\u8D25\uFF1A${r.error || "\u672A\u77E5\u9519\u8BEF"}`;
-      new import_obsidian4.Notice(`CC98: \u767B\u5F55\u5931\u8D25 \u2014 ${r.error || "\u672A\u77E5\u9519\u8BEF"}`, 12e3);
+      if (notify) {
+        new import_obsidian4.Notice(`CC98: \u767B\u5F55\u5931\u8D25 \u2014 ${r.error || "\u672A\u77E5\u9519\u8BEF"}`, 12e3);
+      }
       return { ok: false, error: r.error };
     }
     this.settings.accessToken = normalizeAccessToken(r.accessToken);
@@ -2129,7 +2195,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     const mins = r.expiresIn ? Math.round(r.expiresIn / 60) : void 0;
     this.lastLoginMessage = me.ok ? mins ? `\u767B\u5F55\u5B8C\u6210 \xB7 token \u7EA6 ${mins} \u5206\u949F\u6709\u6548` : "\u767B\u5F55\u5B8C\u6210" : `\u5DF2\u83B7\u53D6 token\uFF0C\u5C1A\u672A\u9A8C\u8BC1\uFF1A${me.error || "\u65E0\u6CD5\u8BFB\u53D6\u8D26\u53F7\u4FE1\u606F"}`;
     await this.saveSettings();
-    new import_obsidian4.Notice(`CC98: ${this.lastLoginMessage}`, 8e3);
+    if (notify) new import_obsidian4.Notice(`CC98: ${this.lastLoginMessage}`, 8e3);
     return {
       ok: true,
       accessToken: this.settings.accessToken,
@@ -2153,7 +2219,6 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     const canLogin = !!(s.autoLoginBeforeUpload && ((_a = s.username) == null ? void 0 : _a.trim()) && pass);
     const result = await refreshThenLogin(
       refresh ? async () => {
-        new import_obsidian4.Notice("CC98: \u6B63\u5728\u5237\u65B0 token \u2026");
         const r = await refreshAccessToken(s.openIdBase, refresh);
         if (!r.ok || !r.accessToken) {
           console.warn("[CC98 Publish] refresh failed", r.error);
@@ -2173,7 +2238,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
           refreshToken: this.settings.refreshToken
         };
       } : null,
-      canLogin ? () => this.loginWithCredentialsNow() : null
+      canLogin ? () => this.loginWithCredentialsNow(false) : null
     );
     if (result == null ? void 0 : result.ok) return result;
     if (!s.autoLoginBeforeUpload) {
@@ -2321,7 +2386,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
         secretWriteOk = false;
         console.warn("[CC98 Publish] secretStorage write failed", e);
         new import_obsidian4.Notice(
-          "CC98: \u5BC6\u94A5\u5B58\u50A8\u5199\u5165\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559 data.json \u4E2D\u7684 token\uFF08\u82E5\u6709\uFF09",
+          "CC98: \u5BC6\u94A5\u5B58\u50A8\u5199\u5165\u5931\u8D25\uFF1BAccess Token \u5C06\u56DE\u9000\u5230 data.json\uFF0CRefresh Token \u4EC5\u5728\u542F\u7528\u6301\u4E45\u5316\u65F6\u4FDD\u7559",
           1e4
         );
       }
@@ -2352,7 +2417,6 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     }
     this.running = true;
     const start = Date.now();
-    new import_obsidian4.Notice("CC98: \u5F00\u59CB\u5904\u7406\u2026");
     try {
       await fn();
       if (!this.unloaded) {
@@ -2382,7 +2446,6 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice("CC98: \u5F53\u524D\u6587\u4EF6\u4E0D\u662F Markdown\uFF08.md\uFF09\uFF0C\u8BF7\u6253\u5F00\u7B14\u8BB0\u540E\u518D\u8BD5");
       return;
     }
-    new import_obsidian4.Notice(`CC98: \u8BFB\u53D6\u300C${file.basename}\u300D\u2026`);
     const source = await this.app.vault.read(file);
     if (this.unloaded) return;
     await this.runPipeline(source, file.path, file.basename, upload);
@@ -2400,126 +2463,103 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     await this.runPipeline(selected, sourcePath, basename, upload);
   }
   async runPipeline(source, sourcePath, basename, upload) {
-    let settings = this.effectiveSettings();
-    const converted = convertMarkdown(source, {
-      stripFrontmatter: settings.stripFrontmatter,
-      stripFirstH1: settings.stripFirstH1,
-      stripTags: settings.stripTags
-    });
-    const localCount = converted.localImageRefs.length;
-    let doUpload = upload && localCount > 0;
-    if (doUpload) {
-      const auth = await this.ensureAuthTokens();
-      settings = this.effectiveSettings();
-      if (!auth.ok && !normalizeAccessToken(settings.accessToken)) {
+    const progress = new import_obsidian4.Notice("CC98: \u6B63\u5728\u8F6C\u6362\u2026", 0);
+    try {
+      let settings = this.effectiveSettings();
+      const converted = convertMarkdown(source, {
+        stripFrontmatter: settings.stripFrontmatter,
+        stripFirstH1: settings.stripFirstH1,
+        stripTags: settings.stripTags
+      });
+      const localCount = converted.localImageRefs.length;
+      let doUpload = upload && localCount > 0;
+      let preflightError = "";
+      if (doUpload) {
+        progress.setMessage("CC98: \u6B63\u5728\u9A8C\u8BC1\u767B\u5F55\u5E76\u51C6\u5907\u4E0A\u4F20\u2026");
+        const auth = await this.ensureAuthTokens();
+        settings = this.effectiveSettings();
+        if (!auth.ok && !normalizeAccessToken(settings.accessToken)) {
+          preflightError = auth.error || "\u9274\u6743\u5931\u8D25";
+          doUpload = false;
+        }
+      }
+      progress.setMessage(
+        doUpload ? `CC98: \u6B63\u5728\u4E0A\u4F20 ${localCount} \u5F20\u56FE\u7247\uFF08\u6BCF\u5F20\u6700\u591A\u7EA6 20s\uFF09\u2026` : "CC98: \u6B63\u5728\u751F\u6210\u6B63\u6587\u2026"
+      );
+      const img = await processImages(
+        this.app,
+        sourcePath,
+        converted,
+        settings,
+        doUpload,
+        () => this.reauthAfter401()
+      );
+      if (this.unloaded) return;
+      if (img.newAccessToken) {
+        this.settings.accessToken = img.newAccessToken;
+      }
+      if (img.newRefreshToken) {
+        this.settings.refreshToken = img.newRefreshToken;
+        this.sessionRefreshToken = img.newRefreshToken;
+      }
+      if (img.newAccessToken || img.newRefreshToken) {
+        await this.saveSettings();
+      }
+      if (img.uploaded > 0) {
+        this.loginVerified = true;
+        this.lastLoginMessage = "\u767B\u5F55\u5B8C\u6210 \xB7 \u4E0A\u4F20\u9274\u6743\u5DF2\u9A8C\u8BC1";
+      }
+      if (this.unloaded) return;
+      const format = getExportFormat(settings);
+      const body = formatExportBody(img.body, format);
+      const hasLocalImages = hasUnresolvedLocalImages(body);
+      progress.setMessage("CC98: \u6B63\u5728\u5199\u5165\u526A\u8D34\u677F\u2026");
+      try {
+        await copyTextToClipboard(body);
+      } catch (e) {
+        progress.hide();
         new import_obsidian4.Notice(
-          `CC98: ${auth.error || "\u9274\u6743\u5931\u8D25"}\u3002\u5C06\u53EA\u8F6C\u6362\u4E0D\u4E0A\u4F20\u3002`,
-          12e3
+          `CC98: \u590D\u5236\u5931\u8D25 \u2014 ${e instanceof Error ? e.message : String(e)}\u3002\u6B63\u6587 ${body.length} \u5B57\u5DF2\u751F\u6210\u3002`,
+          15e3
         );
-        doUpload = false;
-      } else {
-        new import_obsidian4.Notice(
-          `CC98: \u8F6C\u6362\u5B8C\u6210\uFF0C\u5F00\u59CB\u4E0A\u4F20 ${localCount} \u5F20\u56FE\uFF08\u6BCF\u5F20\u6700\u591A\u7EA6 20s\uFF09\u2026`
+        console.warn(
+          "[CC98 Publish] clipboard failed",
+          e instanceof Error ? e.name : "error",
+          "bodyLength=",
+          body.length
+        );
+        return;
+      }
+      if (this.unloaded) return;
+      const title = converted.title || basename;
+      if (img.failed.length) {
+        console.warn("[CC98 Publish] image failures:", img.failed);
+      }
+      const resultMessage = formatCopyResultNotice({
+        bodyLength: body.length,
+        format,
+        localCount,
+        uploadAttempted: doUpload,
+        uploaded: img.uploaded,
+        failures: img.failed,
+        unresolvedLocalImages: hasLocalImages,
+        maxLength: settings.maxLength,
+        title,
+        showTitle: settings.showTitleNotice,
+        preflightError: preflightError || void 0
+      });
+      progress.hide();
+      new import_obsidian4.Notice(
+        resultMessage,
+        preflightError || img.failed.length || hasLocalImages ? 15e3 : 1e4
+      );
+      if (!this.unloaded && !hasLocalImages && settings.openEditorAfterCopy && settings.defaultBoardId) {
+        window.open(
+          `https://www.cc98.org/editor/postTopic/${settings.defaultBoardId}`
         );
       }
-    }
-    if (!doUpload) {
-      new import_obsidian4.Notice(
-        localCount === 0 ? "CC98: \u8F6C\u6362\u5B8C\u6210\uFF08\u65E0\u672C\u5730\u56FE\uFF09\uFF0C\u5199\u5165\u526A\u8D34\u677F\u2026" : "CC98: \u8F6C\u6362\u5B8C\u6210\uFF0C\u5199\u5165\u526A\u8D34\u677F\uFF08\u672A\u4E0A\u4F20\uFF09\u2026"
-      );
-    }
-    const img = await processImages(
-      this.app,
-      sourcePath,
-      converted,
-      settings,
-      doUpload,
-      () => this.reauthAfter401()
-    );
-    if (this.unloaded) return;
-    if (img.newAccessToken) {
-      this.settings.accessToken = img.newAccessToken;
-    }
-    if (img.newRefreshToken) {
-      this.settings.refreshToken = img.newRefreshToken;
-      this.sessionRefreshToken = img.newRefreshToken;
-    }
-    if (img.newAccessToken || img.newRefreshToken) {
-      await this.saveSettings();
-    }
-    if (img.uploaded > 0) {
-      this.loginVerified = true;
-      this.lastLoginMessage = "\u767B\u5F55\u5B8C\u6210 \xB7 \u4E0A\u4F20\u9274\u6743\u5DF2\u9A8C\u8BC1";
-    }
-    if (this.unloaded) return;
-    const format = getExportFormat(settings);
-    let body = formatExportBody(img.body, format);
-    const hasLocalImages = hasUnresolvedLocalImages(body);
-    try {
-      await copyTextToClipboard(body);
-    } catch (e) {
-      new import_obsidian4.Notice(
-        `CC98: \u590D\u5236\u5931\u8D25 \u2014 ${e instanceof Error ? e.message : String(e)}\u3002\u6B63\u6587 ${body.length} \u5B57\u5DF2\u751F\u6210\u3002`,
-        15e3
-      );
-      console.warn(
-        "[CC98 Publish] clipboard failed",
-        e instanceof Error ? e.name : "error",
-        "bodyLength=",
-        body.length
-      );
-      return;
-    }
-    if (this.unloaded) return;
-    const title = converted.title || basename;
-    const parts = [
-      `\u5DF2\u590D\u5236 ${body.length} \u5B57`,
-      format === "ubb" ? "\u5BFC\u51FA UBB" : "\u5BFC\u51FA Markdown"
-    ];
-    if (localCount === 0) {
-      parts.push("\u65E0\u672C\u5730\u56FE");
-    } else if (!doUpload) {
-      parts.push("\u672A\u4E0A\u4F20");
-    } else {
-      parts.push(`\u4E0A\u4F20 ${img.uploaded}/${localCount}`);
-    }
-    if (img.failed.length) {
-      parts.push(`\u5931\u8D25 ${img.failed.length}`);
-    }
-    if (body.length > settings.maxLength) {
-      parts.push(`\u26A0 \u8D85\u8FC7 ${settings.maxLength} \u5B57`);
-    }
-    new import_obsidian4.Notice(`CC98: ${parts.join(" \xB7 ")}`, 1e4);
-    if (hasLocalImages) {
-      new import_obsidian4.Notice(
-        "CC98: \u5DF2\u590D\u5236\uFF0C\u4F46\u6B63\u6587\u4ECD\u6709\u672C\u5730\u56FE\u7247\u8DEF\u5F84\uFF0C\u8BF7\u52FF\u76F4\u63A5\u53D1\u5E16\u3002",
-        12e3
-      );
-    } else if (doUpload && localCount > 0 && img.uploaded === 0) {
-      new import_obsidian4.Notice(
-        "CC98: \u672C\u5730\u56FE\u4E00\u5F20\u90FD\u6CA1\u4E0A\u4F20\u6210\u529F\u3002\u8BF7\u67E5\u770B\u56FE\u7247\u95EE\u9898\u4E0E\u63A7\u5236\u53F0\u3002",
-        12e3
-      );
-    } else {
-      new import_obsidian4.Notice(
-        format === "ubb" ? "\u8BF7\u7C98\u8D34\u5230 CC98\u300CUBB\u300D\u7F16\u8F91\u5668" : "\u8BF7\u7C98\u8D34\u5230 CC98\u300CMarkdown\u300D\u7F16\u8F91\u5668",
-        8e3
-      );
-    }
-    if (settings.showTitleNotice && title) {
-      new import_obsidian4.Notice(`CC98 \u6807\u9898\u5EFA\u8BAE: ${title}`, 8e3);
-    }
-    if (img.failed.length) {
-      console.warn("[CC98 Publish] image failures:", img.failed);
-      new import_obsidian4.Notice(
-        `CC98 \u56FE\u7247\u95EE\u9898: ${img.failed.slice(0, 3).join("; ")}${img.failed.length > 3 ? "\u2026" : ""}`,
-        12e3
-      );
-    }
-    if (!this.unloaded && !hasLocalImages && settings.openEditorAfterCopy && settings.defaultBoardId) {
-      window.open(
-        `https://www.cc98.org/editor/postTopic/${settings.defaultBoardId}`
-      );
+    } finally {
+      progress.hide();
     }
   }
 };
