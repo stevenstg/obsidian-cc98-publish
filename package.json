@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-cc98-publish",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Copy Obsidian notes as CC98-ready UBB or Markdown with image upload",
 	"main": "main.js",
 	"scripts": {
