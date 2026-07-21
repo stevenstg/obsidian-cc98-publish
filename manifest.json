@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-cc98-publish",
 	"name": "CC98 Publish",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"minAppVersion": "1.5.0",
 	"description": "Convert Obsidian notes to CC98-ready UBB or Markdown, upload local images, and copy for pasting into the forum editor.",
 	"author": "stevenstg",
