@@ -18,7 +18,7 @@ import {
 } from "./src/cc98-api";
 import { settingsForDisk } from "./src/settings-storage";
 import { createSingleFlight, refreshThenLogin } from "./src/auth-flow";
-import { formatExportBody } from "./src/export";
+import { formatExportBody, hasUnresolvedLocalImages } from "./src/export";
 
 const SECRET_ACCESS = "cc98-publish-access";
 const SECRET_REFRESH = "cc98-publish-refresh";
@@ -629,6 +629,7 @@ export default class Cc98PublishPlugin extends Plugin {
 		const format = getExportFormat(settings);
 		// Full MD→UBB when export format is UBB (images already [img] or still MD img)
 		let body = formatExportBody(img.body, format);
+		const hasLocalImages = hasUnresolvedLocalImages(body);
 
 		try {
 			await copyTextToClipboard(body);
@@ -669,9 +670,14 @@ export default class Cc98PublishPlugin extends Plugin {
 
 		new Notice(`CC98: ${parts.join(" · ")}`, 10000);
 
-		if (doUpload && localCount > 0 && img.uploaded === 0) {
+		if (hasLocalImages) {
 			new Notice(
-				"CC98: 本地图一张都没上传成功。请检查 token 与网络（RVPN/代理直连）。详情见控制台。",
+				"CC98: 已复制，但正文仍有本地图片路径，请勿直接发帖。",
+				12000
+			);
+		} else if (doUpload && localCount > 0 && img.uploaded === 0) {
+			new Notice(
+				"CC98: 本地图一张都没上传成功。请查看图片问题与控制台。",
 				12000
 			);
 		} else {
@@ -698,17 +704,8 @@ export default class Cc98PublishPlugin extends Plugin {
 		}
 
 		if (
-			/!\[[^\]]*\]\((?!\s*https?:)[^)]+\)/.test(body) ||
-			/!\[\[[^\]]+\]\]/.test(body)
-		) {
-			new Notice(
-				"CC98: 正文里仍有未替换的本地图片路径，论坛不会显示。",
-				10000
-			);
-		}
-
-		if (
 			!this.unloaded &&
+			!hasLocalImages &&
 			settings.openEditorAfterCopy &&
 			settings.defaultBoardId
 		) {

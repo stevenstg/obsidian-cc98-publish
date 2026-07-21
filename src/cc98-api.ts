@@ -1,10 +1,12 @@
 import { requestUrl } from "obsidian";
 import { CC98_CLIENT } from "./settings";
+import { buildMultipart } from "./multipart";
 
 export interface UploadResult {
 	ok: boolean;
 	url?: string;
 	error?: string;
+	status?: number;
 	/** True when error looks like campus-network / proxy / timeout. */
 	networkIssue?: boolean;
 }
@@ -187,40 +189,6 @@ export async function refreshAccessToken(
 	);
 }
 
-function sanitizeFilename(fileName: string): string {
-	return fileName
-		.replace(/["\r\n\\]/g, "_")
-		.replace(/[\x00-\x1f\x7f]/g, "_");
-}
-
-/**
- * Build multipart/form-data body for field name "files" (CC98 API).
- */
-function buildMultipart(
-	fileName: string,
-	data: ArrayBuffer,
-	mimeType: string
-): { body: ArrayBuffer; contentType: string } {
-	const boundary = "----Cc98FormBoundary" + Date.now().toString(16);
-	const safeName = sanitizeFilename(fileName);
-	const encoder = new TextEncoder();
-	const head = encoder.encode(
-		`--${boundary}\r\n` +
-			`Content-Disposition: form-data; name="files"; filename="${safeName}"\r\n` +
-			`Content-Type: ${mimeType}\r\n\r\n`
-	);
-	const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
-	const fileBytes = new Uint8Array(data);
-	const out = new Uint8Array(head.length + fileBytes.length + tail.length);
-	out.set(head, 0);
-	out.set(fileBytes, head.length);
-	out.set(tail, head.length + fileBytes.length);
-	return {
-		body: out.buffer,
-		contentType: `multipart/form-data; boundary=${boundary}`,
-	};
-}
-
 export async function uploadFile(
 	apiBase: string,
 	accessToken: string,
@@ -253,13 +221,22 @@ export async function uploadFile(
 			"上传"
 		);
 
-		if (res.status === 401 || res.status === 403) {
-			return { ok: false, error: `上传鉴权失败 HTTP ${res.status}` };
+		if (res.status === 401) {
+			return { ok: false, status: 401, error: "上传鉴权失败 HTTP 401" };
+		}
+		if (res.status === 403) {
+			const text = (res.text || "").replace(/\s+/g, " ").trim().slice(0, 200);
+			return {
+				ok: false,
+				status: 403,
+				error: `上传被拒绝 HTTP 403${text ? `: ${text}` : ""}`,
+			};
 		}
 		if (res.status < 200 || res.status >= 300) {
 			const text = (res.text || "").slice(0, 200);
 			return {
 				ok: false,
+				status: res.status,
 				error: `上传失败 HTTP ${res.status}${text ? `: ${text}` : ""}`,
 				networkIssue: res.status === 0,
 			};

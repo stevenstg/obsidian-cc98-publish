@@ -15,7 +15,11 @@ import {
 	normalizeAccessToken,
 	UploadResult,
 } from "./cc98-api";
-import { shouldFailFastUpload } from "./upload-policy";
+import {
+	isUploadAuthFailure,
+	shouldFailFastUpload,
+	shouldRetryUpload,
+} from "./upload-policy";
 import { refreshThenLogin } from "./auth-flow";
 import type { Cc98PublishSettings } from "./settings";
 import { getExportFormat } from "./settings";
@@ -46,20 +50,30 @@ export function resolveVaultFile(
 	imagePath: string
 ): TFile | null {
 	const cleaned = imagePath.trim().replace(/^<|>$/g, "");
-	const dest = app.metadataCache.getFirstLinkpathDest(cleaned, sourcePath);
-	if (dest instanceof TFile) return dest;
-
-	const direct = app.vault.getAbstractFileByPath(normalizePathKey(cleaned));
-	if (direct instanceof TFile) return direct;
+	const candidates = [cleaned];
+	try {
+		const decoded = decodeURIComponent(cleaned);
+		if (decoded !== cleaned) candidates.push(decoded);
+	} catch {
+		// Keep the literal path when it contains an invalid percent escape.
+	}
 
 	const sourceDir = sourcePath.includes("/")
 		? sourcePath.slice(0, sourcePath.lastIndexOf("/"))
 		: "";
-	const rel = normalizePathKey(
-		sourceDir ? `${sourceDir}/${cleaned}` : cleaned
-	);
-	const relFile = app.vault.getAbstractFileByPath(rel);
-	if (relFile instanceof TFile) return relFile;
+	for (const candidate of candidates) {
+		const dest = app.metadataCache.getFirstLinkpathDest(candidate, sourcePath);
+		if (dest instanceof TFile) return dest;
+
+		const direct = app.vault.getAbstractFileByPath(normalizePathKey(candidate));
+		if (direct instanceof TFile) return direct;
+
+		const rel = normalizePathKey(
+			sourceDir ? `${sourceDir}/${candidate}` : candidate
+		);
+		const relFile = app.vault.getAbstractFileByPath(rel);
+		if (relFile instanceof TFile) return relFile;
+	}
 
 	return null;
 }
@@ -93,10 +107,6 @@ async function ensureAccessToken(
 		token: "",
 		error: "未配置 Access Token 或 Refresh Token，无法上传图片",
 	};
-}
-
-function isAuthFailure(result: UploadResult): boolean {
-	return !!result.error && /鉴权|401|403/.test(result.error);
 }
 
 /**
@@ -189,7 +199,7 @@ export async function processImages(
 		);
 
 		// 401/403 once: refresh → password grant → retry this image only
-		if (!result.ok && isAuthFailure(result) && !reauthAttempted) {
+		if (!result.ok && isUploadAuthFailure(result) && !reauthAttempted) {
 			reauthAttempted = true;
 			let recovered = false;
 
@@ -248,9 +258,20 @@ export async function processImages(
 			}
 		}
 
+		if (shouldRetryUpload(result)) {
+			// ponytail: one fixed retry; use Retry-After if CC98 exposes it later.
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			result = await uploadFile(
+				settings.apiBase,
+				token,
+				file.name,
+				data
+			);
+		}
+
 		if (!result.ok || !result.url) {
 			failed.push(`${ref.path}: ${result.error || "上传失败"}`);
-			if (shouldFailFastUpload(result) || isAuthFailure(result)) {
+			if (shouldFailFastUpload(result)) {
 				const rest = refs.length - idx - 1;
 				if (rest > 0) {
 					failed.push(
