@@ -213,7 +213,9 @@ export class Cc98SettingTab extends PluginSettingTab {
 
 		new Setting(advBody)
 			.setName("持久化 Refresh Token")
-			.setDesc("OneDrive vault 建议关闭")
+			.setDesc(
+				"关闭更安全；开启可减少重复登录，但 token 可能随 vault 同步"
+			)
 			.addToggle((t) =>
 				t
 					.setValue(this.plugin.settings.persistRefreshToken)
