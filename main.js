@@ -1123,6 +1123,39 @@ var Cc98SettingTab = class extends import_obsidian.PluginSettingTab {
   }
 };
 
+// src/multipart.ts
+function sanitizeFilename(fileName) {
+  return fileName.replace(/["\r\n\\]/g, "_").replace(/[\x00-\x1f\x7f]/g, "_");
+}
+function buildMultipart(fileName, data, mimeType) {
+  const boundary = "----Cc98FormBoundary" + Date.now().toString(16);
+  const safeName = sanitizeFilename(fileName);
+  const encoder = new TextEncoder();
+  const head = encoder.encode(
+    `--${boundary}\r
+Content-Disposition: form-data; name="contentType"\r
+\r
+multipart/form-data\r
+--${boundary}\r
+Content-Disposition: form-data; name="files"; filename="${safeName}"\r
+Content-Type: ${mimeType}\r
+\r
+`
+  );
+  const tail = encoder.encode(`\r
+--${boundary}--\r
+`);
+  const fileBytes = new Uint8Array(data);
+  const out = new Uint8Array(head.length + fileBytes.length + tail.length);
+  out.set(head, 0);
+  out.set(fileBytes, head.length);
+  out.set(tail, head.length + fileBytes.length);
+  return {
+    body: out.buffer,
+    contentType: `multipart/form-data; boundary=${boundary}`
+  };
+}
+
 // src/cc98-api.ts
 function normalizeAccessToken(raw) {
   let t = (raw || "").trim();
@@ -1247,33 +1280,6 @@ async function refreshAccessToken(openIdBase, refreshToken) {
     "\u5237\u65B0 token"
   );
 }
-function sanitizeFilename(fileName) {
-  return fileName.replace(/["\r\n\\]/g, "_").replace(/[\x00-\x1f\x7f]/g, "_");
-}
-function buildMultipart(fileName, data, mimeType) {
-  const boundary = "----Cc98FormBoundary" + Date.now().toString(16);
-  const safeName = sanitizeFilename(fileName);
-  const encoder = new TextEncoder();
-  const head = encoder.encode(
-    `--${boundary}\r
-Content-Disposition: form-data; name="files"; filename="${safeName}"\r
-Content-Type: ${mimeType}\r
-\r
-`
-  );
-  const tail = encoder.encode(`\r
---${boundary}--\r
-`);
-  const fileBytes = new Uint8Array(data);
-  const out = new Uint8Array(head.length + fileBytes.length + tail.length);
-  out.set(head, 0);
-  out.set(fileBytes, head.length);
-  out.set(tail, head.length + fileBytes.length);
-  return {
-    body: out.buffer,
-    contentType: `multipart/form-data; boundary=${boundary}`
-  };
-}
 async function uploadFile(apiBase, accessToken, fileName, data, mimeType) {
   const token = normalizeAccessToken(accessToken);
   if (!token) {
@@ -1297,13 +1303,22 @@ async function uploadFile(apiBase, accessToken, fileName, data, mimeType) {
       2e4,
       "\u4E0A\u4F20"
     );
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: `\u4E0A\u4F20\u9274\u6743\u5931\u8D25 HTTP ${res.status}` };
+    if (res.status === 401) {
+      return { ok: false, status: 401, error: "\u4E0A\u4F20\u9274\u6743\u5931\u8D25 HTTP 401" };
+    }
+    if (res.status === 403) {
+      const text = (res.text || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      return {
+        ok: false,
+        status: 403,
+        error: `\u4E0A\u4F20\u88AB\u62D2\u7EDD HTTP 403${text ? `: ${text}` : ""}`
+      };
     }
     if (res.status < 200 || res.status >= 300) {
       const text = (res.text || "").slice(0, 200);
       return {
         ok: false,
+        status: res.status,
         error: `\u4E0A\u4F20\u5931\u8D25 HTTP ${res.status}${text ? `: ${text}` : ""}`,
         networkIssue: res.status === 0
       };
@@ -1423,10 +1438,16 @@ function guessMime(fileName) {
 }
 
 // src/upload-policy.ts
+function isUploadAuthFailure(result) {
+  return !result.ok && !!result.error && /鉴权|401/.test(result.error);
+}
 function shouldFailFastUpload(result) {
   if (result.ok) return false;
   if (result.networkIssue) return true;
-  return !!result.error && /鉴权|401|403/.test(result.error);
+  return isUploadAuthFailure(result);
+}
+function shouldRetryUpload(result) {
+  return !result.ok && result.status === 403;
 }
 
 // src/auth-flow.ts
@@ -1453,16 +1474,24 @@ async function refreshThenLogin(refresh, login) {
 // src/images.ts
 function resolveVaultFile(app, sourcePath, imagePath) {
   const cleaned = imagePath.trim().replace(/^<|>$/g, "");
-  const dest = app.metadataCache.getFirstLinkpathDest(cleaned, sourcePath);
-  if (dest instanceof import_obsidian3.TFile) return dest;
-  const direct = app.vault.getAbstractFileByPath(normalizePathKey(cleaned));
-  if (direct instanceof import_obsidian3.TFile) return direct;
+  const candidates = [cleaned];
+  try {
+    const decoded = decodeURIComponent(cleaned);
+    if (decoded !== cleaned) candidates.push(decoded);
+  } catch (e) {
+  }
   const sourceDir = sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : "";
-  const rel = normalizePathKey(
-    sourceDir ? `${sourceDir}/${cleaned}` : cleaned
-  );
-  const relFile = app.vault.getAbstractFileByPath(rel);
-  if (relFile instanceof import_obsidian3.TFile) return relFile;
+  for (const candidate of candidates) {
+    const dest = app.metadataCache.getFirstLinkpathDest(candidate, sourcePath);
+    if (dest instanceof import_obsidian3.TFile) return dest;
+    const direct = app.vault.getAbstractFileByPath(normalizePathKey(candidate));
+    if (direct instanceof import_obsidian3.TFile) return direct;
+    const rel = normalizePathKey(
+      sourceDir ? `${sourceDir}/${candidate}` : candidate
+    );
+    const relFile = app.vault.getAbstractFileByPath(rel);
+    if (relFile instanceof import_obsidian3.TFile) return relFile;
+  }
   return null;
 }
 async function ensureAccessToken(settings) {
@@ -1488,9 +1517,6 @@ async function ensureAccessToken(settings) {
     token: "",
     error: "\u672A\u914D\u7F6E Access Token \u6216 Refresh Token\uFF0C\u65E0\u6CD5\u4E0A\u4F20\u56FE\u7247"
   };
-}
-function isAuthFailure(result) {
-  return !!result.error && /鉴权|401|403/.test(result.error);
 }
 async function processImages(app, sourcePath, converted, settings, upload, reauthenticate) {
   var _a, _b;
@@ -1558,7 +1584,7 @@ async function processImages(app, sourcePath, converted, settings, upload, reaut
       file.name,
       data
     );
-    if (!result.ok && isAuthFailure(result) && !reauthAttempted) {
+    if (!result.ok && isUploadAuthFailure(result) && !reauthAttempted) {
       reauthAttempted = true;
       let recovered = false;
       if (reauthenticate) {
@@ -1605,9 +1631,18 @@ async function processImages(app, sourcePath, converted, settings, upload, reaut
         break;
       }
     }
+    if (shouldRetryUpload(result)) {
+      await new Promise((resolve) => setTimeout(resolve, 1e3));
+      result = await uploadFile(
+        settings.apiBase,
+        token,
+        file.name,
+        data
+      );
+    }
     if (!result.ok || !result.url) {
       failed.push(`${ref.path}: ${result.error || "\u4E0A\u4F20\u5931\u8D25"}`);
-      if (shouldFailFastUpload(result) || isAuthFailure(result)) {
+      if (shouldFailFastUpload(result)) {
         const rest = refs.length - idx - 1;
         if (rest > 0) {
           failed.push(
@@ -1920,6 +1955,9 @@ function findMatchingClose(text, from, openRun, d) {
 // src/export.ts
 function formatExportBody(body, format) {
   return format === "ubb" ? markdownToUbb(body) : body;
+}
+function hasUnresolvedLocalImages(body) {
+  return /!\[[^\]]*\]\((?!\s*(?:https?:\/\/|data:))[^)]+\)/i.test(body) || /!\[\[[^\]]+\]\]/.test(body) || /\[img\](?!\s*(?:https?:\/\/|data:))[^[]+\[\/img\]/i.test(body);
 }
 
 // main.ts
@@ -2416,6 +2454,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
     if (this.unloaded) return;
     const format = getExportFormat(settings);
     let body = formatExportBody(img.body, format);
+    const hasLocalImages = hasUnresolvedLocalImages(body);
     try {
       await copyTextToClipboard(body);
     } catch (e) {
@@ -2451,9 +2490,14 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
       parts.push(`\u26A0 \u8D85\u8FC7 ${settings.maxLength} \u5B57`);
     }
     new import_obsidian4.Notice(`CC98: ${parts.join(" \xB7 ")}`, 1e4);
-    if (doUpload && localCount > 0 && img.uploaded === 0) {
+    if (hasLocalImages) {
       new import_obsidian4.Notice(
-        "CC98: \u672C\u5730\u56FE\u4E00\u5F20\u90FD\u6CA1\u4E0A\u4F20\u6210\u529F\u3002\u8BF7\u68C0\u67E5 token \u4E0E\u7F51\u7EDC\uFF08RVPN/\u4EE3\u7406\u76F4\u8FDE\uFF09\u3002\u8BE6\u60C5\u89C1\u63A7\u5236\u53F0\u3002",
+        "CC98: \u5DF2\u590D\u5236\uFF0C\u4F46\u6B63\u6587\u4ECD\u6709\u672C\u5730\u56FE\u7247\u8DEF\u5F84\uFF0C\u8BF7\u52FF\u76F4\u63A5\u53D1\u5E16\u3002",
+        12e3
+      );
+    } else if (doUpload && localCount > 0 && img.uploaded === 0) {
+      new import_obsidian4.Notice(
+        "CC98: \u672C\u5730\u56FE\u4E00\u5F20\u90FD\u6CA1\u4E0A\u4F20\u6210\u529F\u3002\u8BF7\u67E5\u770B\u56FE\u7247\u95EE\u9898\u4E0E\u63A7\u5236\u53F0\u3002",
         12e3
       );
     } else {
@@ -2472,13 +2516,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
         12e3
       );
     }
-    if (/!\[[^\]]*\]\((?!\s*https?:)[^)]+\)/.test(body) || /!\[\[[^\]]+\]\]/.test(body)) {
-      new import_obsidian4.Notice(
-        "CC98: \u6B63\u6587\u91CC\u4ECD\u6709\u672A\u66FF\u6362\u7684\u672C\u5730\u56FE\u7247\u8DEF\u5F84\uFF0C\u8BBA\u575B\u4E0D\u4F1A\u663E\u793A\u3002",
-        1e4
-      );
-    }
-    if (!this.unloaded && settings.openEditorAfterCopy && settings.defaultBoardId) {
+    if (!this.unloaded && !hasLocalImages && settings.openEditorAfterCopy && settings.defaultBoardId) {
       window.open(
         `https://www.cc98.org/editor/postTopic/${settings.defaultBoardId}`
       );

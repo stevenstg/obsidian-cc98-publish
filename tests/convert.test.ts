@@ -9,7 +9,10 @@ import {
 	findMdImages,
 	mapOutsideCode,
 } from "../src/convert";
-import { shouldFailFastUpload } from "../src/upload-policy";
+import {
+	shouldFailFastUpload,
+	shouldRetryUpload,
+} from "../src/upload-policy";
 
 describe("convertMarkdown", () => {
 	it("strips frontmatter and first h1", () => {
@@ -218,6 +221,22 @@ describe("shouldFailFastUpload", () => {
 		);
 		assert.equal(
 			shouldFailFastUpload({ ok: false, error: "找不到文件" }),
+			false
+		);
+		assert.equal(
+			shouldFailFastUpload({
+				ok: false,
+				status: 403,
+				error: "上传被拒绝 HTTP 403: forbidden",
+			}),
+			false
+		);
+		assert.equal(
+			shouldRetryUpload({ ok: false, status: 403 }),
+			true
+		);
+		assert.equal(
+			shouldRetryUpload({ ok: false, status: 401 }),
 			false
 		);
 	});
