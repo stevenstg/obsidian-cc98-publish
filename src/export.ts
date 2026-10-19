@@ -2,8 +2,10 @@ import type { ExportFormat } from "./settings";
 import { mapOutsideCode } from "./convert";
 import { markdownToUbb } from "./md-to-ubb";
 
-export function formatExportBody(body: string, format: ExportFormat): string {
-	return format === "ubb" ? markdownToUbb(body) : body;
+import { normalizeMarkdownLinks, type LinkOptions } from "./links";
+
+export function formatExportBody(body: string, format: ExportFormat, options: LinkOptions = {}): string {
+	return format === "ubb" ? markdownToUbb(body, options) : normalizeMarkdownLinks(body, options);
 }
 
 export function hasUnresolvedLocalImages(body: string): boolean {

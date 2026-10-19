@@ -202,7 +202,8 @@ npm run build  # 生产构建
 
 | 设置 | 默认 | 说明 |
 |------|------|------|
-| 导出格式 | UBB | 或 Markdown |
+| 导出格式 | UBB | 或 Markdown；须与论坛编辑器模式一致 |
+| 自动补全网页链接 | 开 | 为正文中的裸 http(s)://、www. 地址生成显式链接；跳过代码 |
 | 用户名 / 密码 | — | 密码仅会话 |
 | 上传前自动登录 | 开 | 无有效 token 时 refresh → 密码登录 |
 | 持久化 Refresh Token | 关 | 同步盘建议关 |
@@ -248,6 +249,21 @@ npm run build  # 生产构建
 | fenced / 缩进代码块 | `----------` … `-----------` |
 
 导出为 **Markdown** 时不做上表转换，图片为 `![](url)`。
+
+### 网页链接
+
+设置中的「自动补全网页链接」默认开启，可手动关闭。开启时，正文中的裸 `https://example.com` 在 Markdown 模式变为 `[https://example.com](https://example.com)`，在 UBB 模式变为 `[url=https://example.com]https://example.com[/url]`；`www.example.com` 的点击目标补上 `https://`。原笔记不会被改写。
+
+已有网页链接的 UBB 转换修复始终生效，不依赖开关：
+
+- 标签与网址相同也保留 `[url=…]…[/url]`。
+- `<https://example.com>` 转成 UBB 链接。
+- URL 支持配对括号、转义括号和尖括号包裹的目标；目标中的空格编码为 `%20`。
+- `[访问官网](https://example.com "点击进入官方网站")` 转为 `[url=https://example.com]访问官网[/url]`，仅省略鼠标悬停提示。Markdown 模式保留标题。
+
+代码中的地址不自动补全，已有链接与图片不会重复套链接。本地路径和非 HTTP(S) 链接不自动转换成网页链接。UBB 模式的裸 B 站、音视频地址仍优先生成媒体标签；显式写成 `[播放](https://example.com/a.mp4)` 则保留为普通链接。
+
+剪贴板里是文本语法；必须粘贴到与导出格式匹配的 CC98 编辑器，渲染后才显示为可点击链接。
 
 ---
 

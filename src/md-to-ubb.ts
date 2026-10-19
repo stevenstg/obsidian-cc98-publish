@@ -6,7 +6,7 @@
  * Code regions: mapOutsideCode (fenced with indent, indented blocks, inline).
  */
 
-import { findMdImages, mapOutsideCodeEx } from "./convert";
+import { mapLinkProse, prepareLinks, type LinkOptions } from "./links";
 
 const HEADING_SIZE: Record<number, number> = {
 	1: 7,
@@ -25,10 +25,10 @@ export function headingSize(level: number): number {
 /**
  * Convert markdown body (after image URL rewrite) to UBB.
  */
-export function markdownToUbb(md: string): string {
-	const out = mapOutsideCodeEx(
+export function markdownToUbb(md: string, options: LinkOptions = {}): string {
+	const out = mapLinkProse(
 		md,
-		(chunk) => convertProseChunk(chunk),
+		(chunk) => convertProseChunk(chunk, options),
 		(chunk) => convertCodeSegment(chunk)
 	);
 	return out.replace(/\n{3,}/g, "\n\n").trim() + "\n";
@@ -59,8 +59,9 @@ function convertCodeSegment(chunk: string): string {
 	return t;
 }
 
-function convertProseChunk(text: string): string {
-	let t = text;
+function convertProseChunk(text: string, options: LinkOptions): string {
+	const links = prepareLinks(text, "ubb", options, (label) => convertProseChunk(label, {}));
+	let t = links.text;
 
 	// Headings
 	t = t.replace(
@@ -80,42 +81,6 @@ function convertProseChunk(text: string): string {
 	t = t.replace(
 		/<center\b[^>]*>([\s\S]*?)<\/center>/gi,
 		(_m, inner: string) => `[align=center]${inner.trim()}[/align]`
-	);
-
-	// Images
-	const imgs = findMdImages(t);
-	for (let k = imgs.length - 1; k >= 0; k--) {
-		const img = imgs[k];
-		const replacement = `[img]${img.path.trim()}[/img]`;
-		t =
-			t.slice(0, img.index) +
-			replacement +
-			t.slice(img.index + img.raw.length);
-	}
-
-	// Links
-	t = t.replace(
-		/\[([^\]]+)\]\(([^)\s]+)\)/g,
-		(_m, label: string, url: string) => {
-			const u = url.trim();
-			const lab = label.trim();
-			if (!lab || lab === u) return u;
-			return `[url=${u}]${lab}[/url]`;
-		}
-	);
-
-	// Media bare URLs
-	t = t.replace(
-		/(^|[\s(])(https?:\/\/(?:www\.)?bilibili\.com\/video\/[^\s)<>]+)/gi,
-		(_m, pre: string, url: string) => `${pre}[bili]${url}[/bili]`
-	);
-	t = t.replace(
-		/(^|[\s(])(https?:\/\/[^\s)<>]+\.(?:mp4|webm|mov)(?:\?[^\s)<>]*)?)/gi,
-		(_m, pre: string, url: string) => `${pre}[video]${url}[/video]`
-	);
-	t = t.replace(
-		/(^|[\s(])(https?:\/\/[^\s)<>]+\.(?:mp3|wav|ogg|m4a)(?:\?[^\s)<>]*)?)/gi,
-		(_m, pre: string, url: string) => `${pre}[audio]${url}[/audio]`
 	);
 
 	// HTML emphasis (allow attributes)
@@ -148,7 +113,7 @@ function convertProseChunk(text: string): string {
 	// HR
 	t = t.replace(/^(-{3,}|\*{3,}|_{3,})\s*$/gm, "----------");
 
-	return t;
+	return links.restore(t);
 }
 
 /**

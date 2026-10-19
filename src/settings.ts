@@ -41,6 +41,8 @@ export interface Cc98PublishSettings {
 	 * - markdown: keep GFM
 	 */
 	exportFormat: ExportFormat;
+	/** Link bare web addresses in prose by default; users can opt out. */
+	autoLinkWebUrls: boolean;
 	/** @deprecated use exportFormat; kept for migration */
 	imageSyntax?: ImageSyntax;
 	stripFrontmatter: boolean;
@@ -62,6 +64,7 @@ export const DEFAULT_SETTINGS: Cc98PublishSettings = {
 	apiBase: "https://api.cc98.org",
 	openIdBase: "https://openid.cc98.org",
 	exportFormat: "ubb",
+	autoLinkWebUrls: true,
 	stripFrontmatter: true,
 	stripFirstH1: true,
 	stripTags: false,
@@ -129,6 +132,16 @@ export class Cc98SettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName("自动补全网页链接")
+			.setDesc("默认开启，可手动关闭。将正文中的 http(s):// 和 www. 地址补全为链接；保留已有链接，跳过代码。导出格式须与论坛编辑器一致；UBB 裸媒体地址仍优先转为媒体标签。")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autoLinkWebUrls)
+				.onChange(async (value) => {
+					this.plugin.settings.autoLinkWebUrls = value;
+					await this.plugin.saveSettings();
+				}));
 
 		containerEl.createEl("h3", { text: "账号登录" });
 		containerEl.createEl("p", {

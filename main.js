@@ -242,10 +242,6 @@ function splitMarkdownCode(md) {
 function mapOutsideCode(md, transform) {
   return splitMarkdownCode(md).map((p) => p.code ? p.text : transform(p.text)).join("");
 }
-function mapOutsideCodeEx(md, onProse, onCode) {
-  const segments = splitMarkdownCode(md);
-  return segments.map((p) => p.code ? onCode(p.text) : onProse(p.text)).join("");
-}
 function stripFrontmatter(md) {
   return md.replace(FRONTMATTER_RE, "");
 }
@@ -843,6 +839,7 @@ var DEFAULT_SETTINGS = {
   apiBase: "https://api.cc98.org",
   openIdBase: "https://openid.cc98.org",
   exportFormat: "ubb",
+  autoLinkWebUrls: true,
   stripFrontmatter: true,
   stripFirstH1: true,
   stripTags: false,
@@ -887,6 +884,10 @@ var Cc98SettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("\u81EA\u52A8\u8865\u5168\u7F51\u9875\u94FE\u63A5").setDesc("\u9ED8\u8BA4\u5F00\u542F\uFF0C\u53EF\u624B\u52A8\u5173\u95ED\u3002\u5C06\u6B63\u6587\u4E2D\u7684 http(s):// \u548C www. \u5730\u5740\u8865\u5168\u4E3A\u94FE\u63A5\uFF1B\u4FDD\u7559\u5DF2\u6709\u94FE\u63A5\uFF0C\u8DF3\u8FC7\u4EE3\u7801\u3002\u5BFC\u51FA\u683C\u5F0F\u987B\u4E0E\u8BBA\u575B\u7F16\u8F91\u5668\u4E00\u81F4\uFF1BUBB \u88F8\u5A92\u4F53\u5730\u5740\u4ECD\u4F18\u5148\u8F6C\u4E3A\u5A92\u4F53\u6807\u7B7E\u3002").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoLinkWebUrls).onChange(async (value) => {
+      this.plugin.settings.autoLinkWebUrls = value;
+      await this.plugin.saveSettings();
+    }));
     containerEl.createEl("h3", { text: "\u8D26\u53F7\u767B\u5F55" });
     containerEl.createEl("p", {
       cls: "setting-item-description",
@@ -1709,6 +1710,226 @@ function settingsForDisk(settings, clearDiskTokens) {
   return out;
 }
 
+// src/links.ts
+function destination(text, open) {
+  var _a, _b;
+  if (text[open] !== "(") return null;
+  let i = open + 1;
+  while (/\s/.test((_a = text[i]) != null ? _a : "") && i < text.length) i++;
+  const tokenStart = i;
+  let raw = "";
+  if (text[i] === "<") {
+    i++;
+    const start = i;
+    while (i < text.length && text[i] !== ">") {
+      if (text[i] === "\n" || text[i] === "\r") return null;
+      if (text[i] === "\\") i++;
+      i++;
+    }
+    if (text[i] !== ">") return null;
+    raw = text.slice(start, i++);
+  } else {
+    const start = i;
+    let depth = 0;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === "\\" && i + 1 < text.length) {
+        i += 2;
+        continue;
+      }
+      if (c === "(") depth++;
+      if (c === ")") {
+        if (!depth) break;
+        depth--;
+      }
+      if (/\s/.test(c)) break;
+      i++;
+    }
+    if (depth) return null;
+    raw = text.slice(start, i);
+  }
+  const tokenEnd = i;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  if (i > tokenEnd && /["'(]/.test((_b = text[i]) != null ? _b : "")) {
+    const close = text[i] === "(" ? ")" : text[i];
+    i++;
+    while (i < text.length && text[i] !== close) {
+      if (text[i] === "\\") i++;
+      i++;
+    }
+    if (text[i++] !== close) return null;
+    while (i < text.length && /\s/.test(text[i])) i++;
+  }
+  if (text[i] !== ")") return null;
+  return { url: raw.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])/g, "$1"), end: i + 1, tokenStart, tokenEnd };
+}
+function labelEnd(text, start) {
+  let depth = 1;
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (text[i] === "[") depth++;
+    if (text[i] === "]") {
+      depth--;
+      if (!depth) return i;
+    }
+  }
+  return -1;
+}
+function webUrl(raw) {
+  if (!/^https?:\/\//i.test(raw)) return null;
+  const encoded = raw.replace(/[\s<>"\[\]\\\x00-\x1f\x7f]/g, (c) => encodeURIComponent(c));
+  try {
+    const parsed = new URL(encoded);
+    return parsed.hostname ? encoded : null;
+  } catch (e) {
+    return null;
+  }
+}
+function mediaTag(url) {
+  if (/^https?:\/\/(?:www\.)?bilibili\.com\/video\//i.test(url)) return "bili";
+  if (/\.(mp4|webm|mov)(?:[?#].*)?$/i.test(url)) return "video";
+  if (/\.(mp3|wav|ogg|m4a)(?:[?#].*)?$/i.test(url)) return "audio";
+  return null;
+}
+function bareEnd(text, start) {
+  let i = start;
+  let depth = 0;
+  while (i < text.length && !/[\s<>"'`\[\]{}，。！？；：、（）“”‘’\uE100\uE101]/.test(text[i])) {
+    if (text[i] === "(") depth++;
+    if (text[i] === ")") {
+      if (!depth) break;
+      depth--;
+    }
+    i++;
+  }
+  while (i > start && /[.,;:!?*]/.test(text[i - 1])) i--;
+  return i;
+}
+function prepareLinks(text, format, options = {}, renderLabel = (label) => label) {
+  let prefix = "\uE000CC98LINK";
+  while (text.includes(prefix)) prefix += "X";
+  const values = [];
+  const shield = (value) => `${prefix}${values.push(value) - 1}\uE001`;
+  const link = (url, label) => format === "ubb" ? `[url=${url}]${label}[/url]` : `[${label.replace(/([\\[\]])/g, "\\$1")}](${url.replace(/\(/g, "%28").replace(/\)/g, "%29")})`;
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const rest = text.slice(i);
+    if (text[i] === "\\" && i + 1 < text.length) {
+      const close = text[i + 1] === "[" ? labelEnd(text, i + 1) : -1;
+      const dest = close >= 0 ? destination(text, close + 1) : null;
+      const end = dest ? dest.end : i + 2;
+      out += shield(text.slice(i, end));
+      i = end;
+      continue;
+    }
+    const ubb = rest.match(/^\[(url(?:=[^\]\r\n]*)?|img|bili|video|audio|code)\][\s\S]*?\[\/(url|img|bili|video|audio|code)\]/i);
+    if (ubb && ubb[1].split("=")[0].toLowerCase() === ubb[2].toLowerCase()) {
+      out += shield(ubb[0]);
+      i += ubb[0].length;
+      continue;
+    }
+    if ((i === 0 || text[i - 1] === "\n") && /^[ \t]{0,3}\[[^\]\n]+\]:/.test(rest)) {
+      const end = text.indexOf("\n", i);
+      const stop = end < 0 ? text.length : end;
+      out += shield(text.slice(i, stop));
+      i = stop;
+      continue;
+    }
+    const image = text[i] === "!" && text[i + 1] === "[";
+    const start = image ? i + 1 : i;
+    if (text[start] === "[") {
+      const close = labelEnd(text, start);
+      const dest = close >= 0 ? destination(text, close + 1) : null;
+      if (dest) {
+        const raw = text.slice(i, dest.end);
+        const url = webUrl(dest.url);
+        let result = raw;
+        if (image && format === "ubb") result = `[img]${dest.url}[/img]`;
+        else if (!image && url && format === "ubb") result = link(url, renderLabel(text.slice(start + 1, close)));
+        else if (!image && url && format === "markdown" && options.autoLinkWebUrls && /\s/.test(dest.url)) {
+          result = text.slice(i, dest.tokenStart) + url + text.slice(dest.tokenEnd, dest.end);
+        }
+        out += shield(result);
+        i = dest.end;
+        continue;
+      }
+      if (close >= 0 && text[close + 1] === "[") {
+        const refEnd = labelEnd(text, close + 1);
+        if (refEnd >= 0) {
+          out += shield(text.slice(i, refEnd + 1));
+          i = refEnd + 1;
+          continue;
+        }
+      }
+    }
+    if (text[i] === "<") {
+      const auto = rest.match(/^<(https?:\/\/[^<>\s]+)>/i);
+      if (auto && webUrl(auto[1])) {
+        out += shield(format === "ubb" ? link(webUrl(auto[1]), auto[1]) : auto[0]);
+        i += auto[0].length;
+        continue;
+      }
+      const html = rest.match(/^<\/?[a-z][^>]*>/i);
+      if (html) {
+        out += html[0];
+        i += html[0].length;
+        continue;
+      }
+    }
+    if (/^(https?:\/\/|www\.)/i.test(rest) && (i === 0 || !/[A-Za-z0-9_@/\\=.:%-]/u.test(text[i - 1]))) {
+      const end = bareEnd(text, i);
+      const raw = text.slice(i, end);
+      const url = webUrl(/^www\./i.test(raw) ? `https://${raw}` : raw);
+      if (url) {
+        const media = format === "ubb" && /^https?:/i.test(raw) ? mediaTag(url) : null;
+        const result = media ? `[${media}]${url}[/${media}]` : options.autoLinkWebUrls ? link(url, raw) : raw;
+        out += shield(result);
+        i = end;
+        continue;
+      }
+    }
+    out += text[i++];
+  }
+  return { text: out, restore: (converted) => converted.replace(new RegExp(`${prefix}(\\d+)\uE001`, "g"), (_m, n) => values[Number(n)]) };
+}
+function normalizeMarkdownLinks(text, options = {}) {
+  if (!options.autoLinkWebUrls) return text;
+  return mapLinkProse(text, (chunk) => {
+    const prepared = prepareLinks(chunk, "markdown", options);
+    return prepared.restore(prepared.text);
+  });
+}
+function mapLinkProse(text, prose, code = (chunk) => chunk) {
+  let prefix = "\uE100CC98CODE";
+  while (text.includes(prefix)) prefix += "X";
+  const values = [];
+  let buffer = "";
+  let out = "";
+  const flush = () => {
+    if (!buffer) return;
+    out += prose(buffer).replace(
+      new RegExp(prefix + "(\\d+)\uE101", "g"),
+      (_m, n) => values[Number(n)]
+    );
+    buffer = "";
+  };
+  for (const part of splitMarkdownCode(text)) {
+    if (!part.code) buffer += part.text;
+    else if (!part.text.includes("\n") && part.text.charCodeAt(0) === 96) {
+      buffer += prefix + (values.push(code(part.text)) - 1) + "\uE101";
+    } else {
+      flush();
+      out += code(part.text);
+    }
+  }
+  flush();
+  return out;
+}
+
 // src/md-to-ubb.ts
 var HEADING_SIZE = {
   1: 7,
@@ -1723,10 +1944,10 @@ function headingSize(level) {
   const n = Math.min(6, Math.max(1, level | 0));
   return (_a = HEADING_SIZE[n]) != null ? _a : 2;
 }
-function markdownToUbb(md) {
-  const out = mapOutsideCodeEx(
+function markdownToUbb(md, options = {}) {
+  const out = mapLinkProse(
     md,
-    (chunk) => convertProseChunk(chunk),
+    (chunk) => convertProseChunk(chunk, options),
     (chunk) => convertCodeSegment(chunk)
   );
   return out.replace(/\n{3,}/g, "\n\n").trim() + "\n";
@@ -1757,8 +1978,9 @@ ${stripped}
   }
   return t;
 }
-function convertProseChunk(text) {
-  let t = text;
+function convertProseChunk(text, options) {
+  const links = prepareLinks(text, "ubb", options, (label) => convertProseChunk(label, {}));
+  let t = links.text;
   t = t.replace(
     /^(#{1,6})\s+(.+?)\s*$/gm,
     (_m, hashes, title) => {
@@ -1773,33 +1995,6 @@ function convertProseChunk(text) {
   t = t.replace(
     /<center\b[^>]*>([\s\S]*?)<\/center>/gi,
     (_m, inner) => `[align=center]${inner.trim()}[/align]`
-  );
-  const imgs = findMdImages(t);
-  for (let k = imgs.length - 1; k >= 0; k--) {
-    const img = imgs[k];
-    const replacement = `[img]${img.path.trim()}[/img]`;
-    t = t.slice(0, img.index) + replacement + t.slice(img.index + img.raw.length);
-  }
-  t = t.replace(
-    /\[([^\]]+)\]\(([^)\s]+)\)/g,
-    (_m, label, url) => {
-      const u = url.trim();
-      const lab = label.trim();
-      if (!lab || lab === u) return u;
-      return `[url=${u}]${lab}[/url]`;
-    }
-  );
-  t = t.replace(
-    /(^|[\s(])(https?:\/\/(?:www\.)?bilibili\.com\/video\/[^\s)<>]+)/gi,
-    (_m, pre, url) => `${pre}[bili]${url}[/bili]`
-  );
-  t = t.replace(
-    /(^|[\s(])(https?:\/\/[^\s)<>]+\.(?:mp4|webm|mov)(?:\?[^\s)<>]*)?)/gi,
-    (_m, pre, url) => `${pre}[video]${url}[/video]`
-  );
-  t = t.replace(
-    /(^|[\s(])(https?:\/\/[^\s)<>]+\.(?:mp3|wav|ogg|m4a)(?:\?[^\s)<>]*)?)/gi,
-    (_m, pre, url) => `${pre}[audio]${url}[/audio]`
   );
   t = t.replace(
     /<(b|strong)\b[^>]*>([\s\S]*?)<\/\1>/gi,
@@ -1817,7 +2012,7 @@ function convertProseChunk(text) {
   t = convertMarkdownEmphasis(t);
   t = t.replace(/^>\s?/gm, "");
   t = t.replace(/^(-{3,}|\*{3,}|_{3,})\s*$/gm, "----------");
-  return t;
+  return links.restore(t);
 }
 function convertMarkdownEmphasis(text) {
   let t = convertStarOrUnderscore(text, "*");
@@ -1955,8 +2150,8 @@ function findMatchingClose(text, from, openRun, d) {
 }
 
 // src/export.ts
-function formatExportBody(body, format) {
-  return format === "ubb" ? markdownToUbb(body) : body;
+function formatExportBody(body, format, options = {}) {
+  return format === "ubb" ? markdownToUbb(body, options) : normalizeMarkdownLinks(body, options);
 }
 function hasUnresolvedLocalImages(body) {
   let found = false;
@@ -2517,7 +2712,7 @@ var Cc98PublishPlugin = class extends import_obsidian4.Plugin {
       if (this.unloaded) return;
       const format = getExportFormat(settings);
       const hasLocalImages = hasUnresolvedLocalImages(img.body);
-      const body = formatExportBody(img.body, format);
+      const body = formatExportBody(img.body, format, { autoLinkWebUrls: settings.autoLinkWebUrls });
       progress.setMessage("CC98: \u6B63\u5728\u5199\u5165\u526A\u8D34\u677F\u2026");
       try {
         await copyTextToClipboard(body);
